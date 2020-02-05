@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+
+URL="https://raw.githubusercontent.com/alex2844/appbuilder/master/docker.sh";
+ROOT=$(pwd);
+RUN=$(echo $0 | sed 's/\/usr\/local\/bin\///g' | sed 's/\/dev\/fd\/.*//g');
+ARCH=$(uname -m);
+DIST=$(awk -F= '$1=="ID" { print $2 ;}' /etc/os-release);
+while [ -n "$1" ]; do
+	case $1 in
+		-S | --ssh )
+			shift
+			SSH=$1;;
+		* )
+			METHOD=$1;;
+	esac
+	shift
+done
+ssh-ping() {
+	res=$(ssh -o PasswordAuthentication='no' -o ConnectTimeout='5' $1 exit 2>&1);
+	if [ -z "$res" ]; then
+		echo 'online';
+	elif [[ "$res" =~ "Permission denied" ]]; then
+		echo 'denied';
+	else
+		echo 'offline';
+	fi
+}
+ssh-auth() {
+	expect <<- DONE
+		set timeout 21600;
+		eval spawn $2 $3;
+		expect {
+			"continue connecting (yes/no)?" { send "yes\r"; exp_continue }
+			" password: " { send "$1\r\r"; exp_continue }
+			eof
+		}
+	DONE
+}
+ssh-fetch() {
+	ssh-auth "$1" "ssh $2" "curl -s --unix-socket /var/run/$3.sock $4";
+}
+fetch() {
+	$(echo $([ `type -p curl` ] && echo "curl -s" || echo "wget -q -O -")" $1");
+}
+json() {
+	echo "$1" | jq -r "$2";
+}
+if [ -f /.dockerenv ]; then
+    echo "Hmmmm...."; # change platform android, linux, windows
+else
+	if [ -z "$METHOD" ] || [ "$METHOD" == "help" ]; then
+		echo '---------------';
+			echo 'Help AppBuilder';
+		echo '---------------';
+			echo "Usage: $RUN [options...] <method>";
+		echo '---------------';
+			echo "$RUN install";
+			echo "$RUN [-S] build";
+			echo "$RUN help debug";
+			if [ "$2" == "debug" ]; then
+				echo "$RUN make";
+				echo "$RUN shell";
+			fi
+		echo '---------------';
+			echo '-S, --ssh <user@host>';
+		echo '---------------';
+	elif [ "$METHOD" == "install" ]; then
+		case "$DIST" in
+			ubuntu|debian|raspbian|centos|fedora)
+				if [[ -z `type -p docker` ]]; then
+					bash <(fetch "https://get.docker.com/");
+				fi
+				docker pull alex2844/appbuilder;
+			;;
+		esac
+		if [ ! -e "/usr/local/bin/appbuilder" ]; then
+			if [ -z "$RUN" ]; then
+				fetch $URL > /usr/local/bin/appbuilder;
+			else
+				cp $0 /usr/local/bin/appbuilder;
+			fi
+			chmod +x /usr/local/bin/appbuilder;
+		fi
+	elif [ "$METHOD" == "shell" ]; then
+		docker run --rm -v "$PWD":/home/gradle/:cached -i -t alex2844/appbuilder bash;
+	elif [ "$METHOD" == "make" ]; then
+		docker image rm alex2844/appbuilder;
+		docker build -t alex2844/appbuilder .;
+	elif [ "$METHOD" == "build" ]; then
+		if [[ -z `type -p bc` ]]; then
+			case "$DIST" in
+				ubuntu|debian|raspbian)
+					sudo apt install bc -y;
+				;;
+				centos)
+					sudo yum install bc;
+				;;
+				fedora)
+					sudo dnf install bc;
+				;;
+			esac
+		fi
+		if [ 1500000 -ge $(echo $(free | awk '/^Mem:/{print $4}')+$(free | awk '/^Swap:/{print $4}') | bc) ]; then
+			if [ ! -e "$HOME/.swapfile" ]; then
+				if [[ `type -p mkswap` ]]; then
+					fallocate -l 1024M "$HOME/.swapfile";
+					chmod 600 "$HOME/.swapfile";
+					mkswap "$HOME/.swapfile";
+					swapon "$HOME/.swapfile";
+					swapon -s;
+					echo "$HOME/.swapfile   none    swap    sw    0   0" >> /etc/fstab;
+				fi
+			fi
+		fi
+		if [ -n "$SSH" ]; then
+			if [[ -z `type -p rsync` ]]; then
+				case "$DIST" in
+					ubuntu|debian|raspbian)
+						sudo apt install rsync -y;
+					;;
+					centos)
+						sudo yum install rsync;
+					;;
+					fedora)
+						sudo dnf install rsync;
+					;;
+				esac
+			fi
+			if [[ -z `type -p expect` ]]; then
+				if [[ -z `type -p bc` ]]; then
+					case "$DIST" in
+						ubuntu|debian|raspbian)
+							sudo apt install expect -y;
+						;;
+						centos)
+							sudo yum install expect;
+						;;
+						fedora)
+							sudo dnf install expect;
+						;;
+						chromeos)
+							if [ ! -e "/usr/local/bin/crew" ]; then
+								echo 'error: crew: command not found';
+								exit 1;
+							fi
+							crew install expect;
+						;;
+					esac
+				fi
+			fi
+			#TMP="/tmp/appbuilder_"$("dbus-uuidgen");
+			TMP="/tmp/appbuilder_"${PWD##*/};
+			auth=$(ssh-ping $SSH);
+			if [ "$auth" == "offline" ]; then
+				echo 'error: connection ssh';
+				exit 1;
+			elif [ "$auth" == "denied" ]; then
+				read -s -p "$SSH's password: " PASS
+				echo;
+			fi
+			ssh-auth "$PASS" "ssh $SSH" 'test ! -f /usr/local/bin/appbuilder && bash <(curl -s '$URL') install'; # save config and skip next
+			ssh-auth "$PASS" "" "rsync -avu --delete --exclude={.gradle,build,app/build} $PWD/ $SSH:$TMP";
+			ssh-auth "$PASS" "ssh $SSH" "docker run --rm -v $TMP:/home/gradle/ -v ~/.cache/appbuilder:/home/gradle/.gradle/:cached alex2844/appbuilder";
+			# build.gradle -> allprojects -> buildDir = "/home/gradle/.gradle/build/${project.name}"
+			ssh-auth "$PASS" "ssh $SSH" "cp $TMP/app/build/outputs/apk/release/app-release.apk $TMP/app-release.apk; cp ~/.cache/appbuilder/build/app/outputs/apk/release/app-release.apk $TMP/app-release.apk";
+			ssh-auth "$PASS" "" "rsync -avu --delete --exclude={.gradle,build,app/build} $SSH:$TMP/ $PWD";
+			# ssh-auth "$PASS" "ssh $SSH" "rm -r $TMP";
+			# ssh-fetch "$PASS" $SSH 'docker' "http:/v1.40/images/json";
+		else
+			docker run --rm -v "$PWD":/home/gradle/ -v ~/.cache/appbuilder:/home/gradle/.gradle/:cached alex2844/appbuilder;
+		fi
+	fi
+fi
