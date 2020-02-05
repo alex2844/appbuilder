@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-URL="https://raw.githubusercontent.com/alex2844/appbuilder/master/docker.sh";
+URL="https://raw.githubusercontent.com/alex2844/appbuilder/master/appbuilder";
 ROOT=$(pwd);
 RUN=$(echo $0 | sed 's/\/usr\/local\/bin\///g' | sed 's/\/dev\/fd\/.*//g');
 ARCH=$(uname -m);
