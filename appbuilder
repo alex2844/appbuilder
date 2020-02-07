@@ -5,6 +5,7 @@ ROOT=$(pwd);
 RUN=$(echo $0 | sed 's/\/usr\/local\/bin\///g' | sed 's/\/dev\/fd\/.*//g');
 ARCH=$(uname -m);
 DIST=$(awk -F= '$1=="ID" { print $2 ;}' /etc/os-release);
+SSH=$APPBUILDER_SSH;
 while [ -n "$1" ]; do
 	case $1 in
 		-S | --ssh )
@@ -159,13 +160,13 @@ else
 				echo;
 			fi
 			ssh-auth "$PASS" "ssh $SSH" 'test ! -f /usr/local/bin/appbuilder && bash <(curl -s '$URL') install'; # save config and skip next
-			ssh-auth "$PASS" "" "rsync -avu --delete --exclude={.gradle,build,app/build} $PWD/ $SSH:$TMP";
-			ssh-auth "$PASS" "ssh $SSH" "docker run --rm -v $TMP:/home/gradle/ -v ~/.cache/appbuilder:/home/gradle/.gradle/:cached alex2844/appbuilder";
-			# build.gradle -> allprojects -> buildDir = "/home/gradle/.gradle/build/${project.name}"
-			ssh-auth "$PASS" "ssh $SSH" "cp $TMP/app/build/outputs/apk/release/app-release.apk $TMP/app-release.apk; cp ~/.cache/appbuilder/build/app/outputs/apk/release/app-release.apk $TMP/app-release.apk";
-			ssh-auth "$PASS" "" "rsync -avu --delete --exclude={.gradle,build,app/build} $SSH:$TMP/ $PWD";
-			# ssh-auth "$PASS" "ssh $SSH" "rm -r $TMP";
 			# ssh-fetch "$PASS" $SSH 'docker' "http:/v1.40/images/json";
+			# ssh-auth "$PASS" "" "rsync -avu --delete --exclude={.gradle,build,app/build} $PWD/ $SSH:$TMP";
+			ssh-auth "$PASS" "" "rsync -avu --delete $PWD/ $SSH:$TMP";
+			ssh-auth "$PASS" "ssh $SSH" "docker run --rm -v $TMP:/home/gradle/ -v ~/.cache/appbuilder:/home/gradle/.gradle/:cached alex2844/appbuilder";
+			ssh-auth "$PASS" "ssh $SSH" "cp ~/.cache/appbuilder/build/outputs/apk/release/app-release.apk $TMP/app-release.apk";
+			ssh-auth "$PASS" "" "rsync -avu --delete $SSH:$TMP/ $PWD";
+			# ssh-auth "$PASS" "ssh $SSH" "rm -r $TMP";
 		else
 			docker run --rm -v "$PWD":/home/gradle/ -v ~/.cache/appbuilder:/home/gradle/.gradle/:cached alex2844/appbuilder;
 		fi

@@ -50,4 +50,4 @@ RUN $ANDROID_HOME/tools/bin/sdkmanager "build-tools;${ANDROID_BUILD_TOOLS_VERSIO
 
 WORKDIR /home/gradle
 VOLUME ["/home/gradle/.gradle"]
-CMD ["gradle", "build"]
+CMD ["gradle", "build", "-Dorg.gradle.project.buildDir=/home/gradle/.gradle/build/"]
