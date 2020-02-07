@@ -88,6 +88,7 @@ else
 		docker image rm alex2844/appbuilder;
 		docker build -t alex2844/appbuilder .;
 	elif [ "$METHOD" == "build" ]; then
+		TIME=$(date +%s);
 		if [[ -z `type -p bc` ]]; then
 			case "$DIST" in
 				ubuntu|debian|raspbian)
@@ -170,5 +171,7 @@ else
 		else
 			docker run --rm -v "$PWD":/home/gradle/ -v ~/.cache/appbuilder:/home/gradle/.gradle/:cached alex2844/appbuilder;
 		fi
+		let TIME=(`date +%s`-$TIME);
+		echo "Execution time - $TIME sec";
 	fi
 fi
